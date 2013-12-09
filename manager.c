@@ -42,6 +42,7 @@ int main (int argc, char** argv)
 		if (fr == 0) 
 		{
 			client_order = st_num(i + 1);  
+			// AP: клиенты не должны знать свой порядок - перепешите без использования заданного порядка
 			if ( execl(for_client,for_client,client_order,NULL) < 0) my_error("execl error on client /n");
 		}	
 	}
