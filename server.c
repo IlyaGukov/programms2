@@ -141,6 +141,7 @@ int main(int argc, char** argv)
 	if (close(fd1) < 0) my_error("cannot close file \n");
 	if ( msgctl ( msg_id , IPC_RMID , NULL ) < 0 ) my_error ("Can not delete message!\n");
 	int sem_id;
+	// AP: сервер не должен ничего знать про семафоры - удалять его должны клиенты
 	if ((sem_key = ftok(PATHFILE, FOR_EVERYONE)) < 0) my_error ("error while generating key for semaphor\n");
 	if ((sem_id = semget (sem_key, 1 , 0666)) < 0) my_error ("error on getting semaphor\n");
         if (semctl (sem_id , 0 , IPC_RMID , 0) < 0) my_error (" can not delete semaphor\n");
