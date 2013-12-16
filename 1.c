@@ -12,6 +12,7 @@
 #include <sys/mman.h>
 #include <stdio.h>
 #include <sys/msg.h>
+#include <signal.h>
 #define PATHFILE "./1.c"
 #define FOR_EVERYBODY 2
 #define DATE_SIZE 26
@@ -44,40 +45,48 @@ int main(int argc, char** argv)
 	DIR* direct;
 	if ((argv[1] = realpath (argv[1],NULL)) == NULL) my_error("no such directory exists \n");
 	if ((direct = opendir(argv[1])) == NULL) my_error("error while open direstory \n");
-	struct dirent *readres;
+	struct dirent** readres;
 	struct stat* buf;
+	readres = (struct dirent**)malloc(sizeof(struct dirent*));
 	int fd, i = 0, file_count = 0;
 	if ((fd = open("result.txt", O_RDWR | O_TRUNC | O_CREAT , 0666)) < 0) my_error("can not open result file\n");
-	while ((readres = readdir(direct)) != NULL) // получаю количество интересных файлов, которые лежат непосредственно в самой папке
-	{
-		if ((strcmp (readres -> d_name, ".") != 0) && (strcmp(readres -> d_name, ".." ) != 0)) file_count ++;
+	while ((readres[file_count] = readdir(direct)) != NULL) // получаю количество интересных файлов, которые лежат непосредственно в   
+	{	// самой папке
+		if ((strcmp ((readres[file_count]) -> d_name, ".") != 0) && (strcmp((readres[file_count]) -> d_name, ".." ) != 0))
+		{
+			file_count ++;
+			readres = (struct dirent**) realloc (readres, (file_count + 1) * sizeof(struct dirent*));
+		}
 	}
-	rewinddir(direct);
 	struct about_file* file_data;
 	buf = (struct stat*)malloc(sizeof(struct stat));
 	file_data = (struct about_file*)malloc(sizeof(struct about_file) * file_count);
-	string_buffer = (char**)malloc(sizeof(char*)); //для имени, хозяина и группы  используется этот массив строк
-	size = file_count * sizeof(struct about_file); // в него они пишутся одной строкой
+	string_buffer = (char** )malloc(sizeof(char*) * file_count); //для имени, хозяина и группы  используется этот массив строк
+	size = (file_count + 2) * sizeof(struct about_file); // в него они пишутся одной строкой
 	char* path;
 	for (; i < file_count; i++) //узнаю о них все, что надо
 	{
-		if ((readres = readdir(direct)) == NULL) my_error("can not read directory \n");
-	 	if ((strcmp (readres -> d_name, ".") != 0) && (strcmp(readres -> d_name, ".." ) != 0))
+	 	if ((strcmp ((readres[i]) -> d_name, ".") != 0) && (strcmp((readres[i]) -> d_name, ".." ) != 0))
 		{
-			path = get_path(readres -> d_name, argv[1]);
+			path = get_path((readres[i]) -> d_name, argv[1]);
 			printf("%s \n", path);
 			if (lstat(path, buf) < 0) my_error("error with stat \n");
-			file_data[i] = get_data( buf, readres -> d_name, i ); // пишу в структуру все, кроме велечин переменного размера
+			file_data[i] = get_data( buf, (readres[i]) -> d_name, i ); // пишу в структуру все, кроме велечин переменного размера
 		} // - имя, хозяин, группа.   
 		else i--;
 	}
-	size += file_data[file_count - 1].string_length; // размер памяти, которую буду отборажать в адресное пространство
+	
+	size += (file_data[file_count - 1].string_length ) ; // размер памяти, которую буду отборажать в адресное пространство
 	if (ftruncate(fd, size) < 0) my_error("truncate error \n");
 	void *ptr1, *ptr2;
 	if ((ptr1 = mmap(NULL, size, PROT_WRITE | PROT_READ, MAP_SHARED, fd, 0)) == MAP_FAILED) my_error("mapping failed \n");
 	if (close(fd) < 0) my_error("cannot close file \n");
 	ptr2 = ptr1;
 	i = 0;
+	*((size_t* )ptr2) = size;
+	ptr2 += sizeof(struct about_file);
+	*((int* )ptr2) = file_count;
+	ptr2 += sizeof(struct about_file);
 	for (; i < file_count; i++) // пишу в файл сначала структуры
 	{
 		*((struct about_file* )(ptr2)) = (file_data[i]) ;
@@ -89,34 +98,15 @@ int main(int argc, char** argv)
 		strcpy(((char* )ptr2),(string_buffer[i]));
                 ptr2 += (strlen(string_buffer[i]) + 1);	
 	}
-	key_t msg_key;
-	int msg_id;
-	if (((msg_key = ftok(PATHFILE,(char)FOR_EVERYBODY)) < 0)) my_error("error while generating key for messages \n");
-	umask(0);
-	if ((msg_id = msgget(msg_key, IPC_CREAT | 0666)) < 0 ) my_error("error on getting messages\n");
-	struct hellomsg
-	{
-		long mtype;
-		struct data 
-		{
-			size_t size;
-			int file_count;
-		}sizes; 	
-	}hello_msg;
-	hello_msg.mtype = HELLO;
-	hello_msg.sizes.size = size;			//сообщение, в котором отправляю второй программе размер и количество файлов
-	hello_msg.sizes.file_count = file_count;
-	if (msgsnd (msg_id ,&hello_msg , sizeof(struct data) , 0) < 0) 
-	{
-		msgctl (msg_id , IPC_RMID , NULL );
-		my_error ("can not send a message\n");
-	}
-	if (msgrcv (msg_id , &hello_msg, 0 , 2 * HELLO , 0) < 0 ) my_error (" can not recieve message\n");
-	if (msgctl ( msg_id , IPC_RMID , NULL ) < 0 ) my_error ("can not delete messages\n");
+	pid_t ppid;
+	ppid = getppid();
+	kill (ppid, SIGUSR1);
 	if (munmap ((void*)ptr1, size) < 0 ) my_error ("error with munap \n");
-	return 0;
+	//free (readres);
 	free (path);
 	free (buf);
+	return 0;
+	
 }
 int my_error(char* s)
 { 
@@ -189,7 +179,7 @@ char* get_permissions(mode_t st_mode)
         if (other & S_IROTH) permissions[6] = 'r';
         if (other & S_IWOTH) permissions[7] = 'w';
         if (other & S_IXOTH) permissions[8] = 'x';
-	printf("%s\n",permissions);
+	//printf("%s\n",permissions);
 	return permissions;
 }
 char* get_path(char* file_name, char* arg)

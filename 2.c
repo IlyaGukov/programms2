@@ -13,12 +13,12 @@
 #include <string.h>
 #include <time.h>
 #include <sys/msg.h>
-#define PATHFILE "./1.c"
+#include <signal.h>
 #define FOR_EVERYBODY 2
 #define DATE_SIZE 26
 #define SIZE_OF_PERMISSIONS 10
 #define TYPE_SIZE 20
-#define HELLO 100
+int k = 0;
 struct about_file
 {
 	size_t string_length;
@@ -30,35 +30,27 @@ struct about_file
 	char file_type[TYPE_SIZE];
 };
 
+void my_handler(int nsig);
+
 int my_error(char* s);
 
 int main()
 {
-	key_t msg_key;
-	int msg_id;
-	if (((msg_key = ftok(PATHFILE,(char)FOR_EVERYBODY)) < 0)) my_error("error while generating key for messages \n");
-	umask(0);
-	if ((msg_id = msgget(msg_key, IPC_CREAT | 0666)) < 0 ) my_error("error on getting messages\n");
-	struct hellomsg
-	{
-		long mtype;
-		struct data 
-		{
-			size_t size;
-			int file_count;
-		}sizes; 	
-	}hello_msg;
-	if (msgrcv (msg_id , &hello_msg, sizeof(struct data) ,  HELLO , 0) < 0 ) my_error (" can not recieve a hello message\n");
+	while(k != 1) (void)signal(SIGUSR1, my_handler);
 	int fd, i = 0, file_count = 0; 
 	size_t size = 0;
 	if ((fd = open("result.txt", O_RDWR | O_CREAT , 0666)) < 0) my_error("can not open result file\n");
-	file_count = hello_msg.sizes.file_count;
-	size = hello_msg.sizes.size;
-	ftruncate(fd, size);
 	struct about_file *ptr1, *ptr2;
+	if ((ptr1 = (struct about_file* )mmap(NULL, sizeof(size_t), PROT_WRITE | PROT_READ, MAP_SHARED, fd, 0)) == MAP_FAILED) my_error("mapping failed \n");
+	ptr2 = ptr1;
+	size = *((size_t*)ptr2);
+	ptr2 ++;
+	if (munmap ((void*)ptr1, size) < 0 ) my_error ("error with munmap \n"); 
 	if ((ptr1 = (struct about_file* )mmap(NULL, size, PROT_WRITE | PROT_READ, MAP_SHARED, fd, 0)) == MAP_FAILED) my_error("mapping failed \n");
 	if (close(fd) < 0) my_error("cannot close file \n");
-	ptr2 = ptr1;
+	ptr2 = (ptr1 + 1);
+	file_count = *((int*)ptr2);
+	ptr2 ++; 
 	printf("number of all files is: %i \n",file_count);
 	for (; i < file_count; i++)
 	{
@@ -69,15 +61,9 @@ int main()
                 printf("last changes date is: %s",ptr2->last_changes_date );
 		printf("file type is: %s", ptr2->file_type);
 		printf("file size is: %i \n", (int)ptr2->file_size);
-		ptr2++;
+		ptr2 ++;
 	}
 	if (munmap ((void*)ptr1, size) < 0 ) my_error ("error with munmap \n");
-	hello_msg.mtype =  HELLO * 2;
-	if (msgsnd (msg_id ,&hello_msg ,0 , 0) < 0) 
-	{
-		msgctl (msg_id , IPC_RMID , NULL );
-		my_error ("can not send a message\n");
-	} 
 	return 0;	
 }
 int my_error(char* s)
@@ -86,4 +72,9 @@ int my_error(char* s)
     	n = strlen(s);
     	write(2,s,n+1);
     	exit(-1);
+}
+void my_handler(int nsig)
+{
+	k++;
+	return; 	
 }
